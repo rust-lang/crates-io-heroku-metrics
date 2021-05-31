@@ -1,0 +1,71 @@
+# Collect internal Vector metrics, useful for debugging Vector issues in prod.
+[sources.self]
+type = "internal_metrics"
+
+# Receive log messages from Heroku applications, using Heroku's Logplex system.
+[sources.heroku]
+type = "heroku_logs"
+address = "0.0.0.0:8001"
+encoding = "text"
+
+# Publish all the collected metrics as a Prometheus exporter.
+[sinks.prometheus]
+type = "prometheus_exporter"
+inputs = ["self", "heroku-postgres"]
+address = "0.0.0.0:8002"
+# Long flush period needed due to Heroku Postgres's log frequency:
+flush_period_secs = 600
+
+###############################
+#   Heroku Postgres metrics   #
+###############################
+
+# Heroku Postgres only outputs its metrics as a single log line roughly every 4
+# to 5 minutes. The transform uses a custom Lua script to extract the metrics
+# from the log line and emit separate Vector metrics for each extracted metric.
+#
+# A filter is used before the Lua script to quickly discard extra log lines.
+
+[transforms.heroku-postgres-filter]
+type = "filter"
+inputs = ["heroku"]
+condition = 'starts_with(.message, "source=HEROKU_POSTGRES") ?? false'
+
+[transforms.heroku-postgres]
+type = "lua"
+version = "2"
+inputs = ["heroku-postgres-filter"]
+hooks.process = '''
+function (event, emit)
+    addon = string.match(event.log.message, "addon=([%w-]+)")
+
+    for key, value in event.log.message:gmatch("sample#([%w-]+)=([^ ]+)") do
+        multiply = 1
+
+        -- Some samples are suffixed with "bytes", strip that
+        value = value:gsub("bytes$", "")
+
+        -- Some samples are suffixed with "kB", strip that and multiply by 1024
+        without_kb = value:gsub("kB$", "")
+        if without_kb ~= value then
+            value = without_kb
+            multiply = multiply * 1024
+        end
+
+        emit({
+            ["metric"] = {
+                ["gauge"] = {
+                    ["value"] = tonumber(value) * multiply,
+                },
+                ["kind"] = "absolute",
+                ["name"] = key:gsub("-", "_"),
+                ["namespace"] = "heroku_postgres",
+                ["tags"] = {
+                    ["addon"] = addon,
+                },
+                ["timestamp"] = event.log.timestamp,
+            }
+        })
+    end
+end
+'''
