@@ -1,3 +1,9 @@
+# The API is needed for the load balancer health checks. Access to the proper
+# API is prevented by nginx.
+[api]
+enabled = true
+address = "0.0.0.0:8000"
+
 # Collect internal Vector metrics, useful for debugging Vector issues in prod.
 [sources.self]
 type = "internal_metrics"
