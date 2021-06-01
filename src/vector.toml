@@ -69,7 +69,6 @@ function (event, emit)
                 ["tags"] = {
                     ["addon"] = addon,
                 },
-                ["timestamp"] = event.log.timestamp,
             }
         })
     end
