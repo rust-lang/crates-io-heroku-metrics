@@ -1,0 +1,35 @@
+name: CI
+on:
+  push: {}
+  pull_request: {}
+  schedule:
+    - cron: "0 12 * * 1" # Every Monday at 12:00 UTC
+
+jobs:
+  ci:
+    name: Build and Deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the source code
+        uses: actions/checkout@v2
+
+      - name: Build the Docker container
+        run: docker build -t crates-io-heroku-metrics .
+
+      - name: Ensure the Vector configuration is correct
+        run: docker run --rm -t crates-io-heroku-metrics vector validate
+
+      - name: Ensure the Nginx configuration is correct
+        run: docker run --rm -t crates-io-heroku-metrics nginx -t
+
+      - name: Deploy to production
+        uses: rust-lang/simpleinfra/github-actions/upload-docker-image@master
+        with:
+          image: crates-io-heroku-metrics
+          repository: crates-io-heroku-metrics
+          region: us-west-1
+          redeploy_ecs_cluster: rust-ecs-prod
+          redeploy_ecs_service: crates-io-heroku-metrics
+          aws_access_key_id: "${{ secrets.AWS_ACCESS_KEY_ID }}"
+          aws_secret_access_key: "${{ secrets.AWS_SECRET_ACCESS_KEY }}"
+        if: github.ref == 'refs/heads/main'
