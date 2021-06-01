@@ -16,6 +16,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
 RUN curl -Lo /tmp/vector.tar.gz https://github.com/timberio/vector/releases/download/v${VECTOR_RELEASE}/vector-${VECTOR_RELEASE}-x86_64-unknown-linux-gnu.tar.gz && \
     echo "${VECTOR_SHA256}  /tmp/vector.tar.gz" | sha256sum -c && \
     tar xf /tmp/vector.tar.gz -C /usr/local/bin --strip-components 3 ./vector-x86_64-unknown-linux-gnu/bin/vector && \
+    mkdir /var/lib/vector && \
     rm /tmp/vector.tar.gz
 
 # Copy the startup script
