@@ -17,7 +17,7 @@ encoding = "text"
 # Publish all the collected metrics as a Prometheus exporter.
 [sinks.prometheus]
 type = "prometheus_exporter"
-inputs = ["self", "heroku-postgres"]
+inputs = ["self", "heroku-postgres", "ingested-metrics"]
 address = "0.0.0.0:8002"
 # Long flush period needed due to Heroku Postgres's log frequency:
 flush_period_secs = 600
@@ -71,6 +71,44 @@ function (event, emit)
                 },
             }
         })
+    end
+end
+'''
+
+########################
+#   Ingested metrics   #
+########################
+
+# Since it's not possible to point Prometheus to the individual Heroku dynos we
+# changed the crates.io application to periodically print its metrics in the
+# logs, relying on Vector to catch and expose them.
+#
+# The metrics line is prefixed with "crates-io-heroku-metrics:ingest" and
+# contains the base64-encoded json-encoded metrics, formatted according to
+# Vector's data model. After decoding the metrics from the log line the Lua
+# transform enriches each metric with the app and process name, and emits each
+# metric as an individual event.
+
+[transforms.ingested-metrics-filter]
+type = "filter"
+inputs = ["heroku"]
+condition = 'starts_with(.message, "crates-io-heroku-metrics:ingest ") ?? false'
+
+[transforms.ingested-metrics-decode]
+type = "remap"
+inputs = ["ingested-metrics-filter"]
+source = '.decoded = parse_json!(decode_base64!(replace!(.message, "crates-io-heroku-metrics:ingest ", "")))'
+
+[transforms.ingested-metrics]
+type = "lua"
+version = "2"
+inputs = ["ingested-metrics-decode"]
+hooks.process = '''
+function (event, emit)
+    for _, metric in ipairs(event.log.decoded) do
+        metric.metric.tags.app = event.log.app_name
+        metric.metric.tags.process = event.log.proc_id
+        emit(metric)
     end
 end
 '''
