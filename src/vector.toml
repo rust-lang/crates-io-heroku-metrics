@@ -13,6 +13,7 @@ type = "internal_metrics"
 type = "heroku_logs"
 address = "0.0.0.0:8001"
 encoding = "text"
+query_parameters = ["app_name"]
 
 # Publish all the collected metrics as a Prometheus exporter.
 [sinks.prometheus]
