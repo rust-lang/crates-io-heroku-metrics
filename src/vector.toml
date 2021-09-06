@@ -18,7 +18,7 @@ query_parameters = ["app_name"]
 # Publish all the collected metrics as a Prometheus exporter.
 [sinks.prometheus]
 type = "prometheus_exporter"
-inputs = ["self", "heroku-postgres", "ingested-metrics"]
+inputs = ["self", "heroku-postgres", "ingested-metrics", "heroku-log-error"]
 address = "0.0.0.0:8002"
 # Long flush period needed due to Heroku Postgres's log frequency:
 flush_period_secs = 600
@@ -110,6 +110,53 @@ function (event, emit)
         metric.metric.tags.app = event.log.app_name
         metric.metric.tags.process = event.log.proc_id
         emit(metric)
+    end
+end
+'''
+
+##########################
+#   Heroku Log Metrics   #
+##########################
+
+# Heroku platform and application errors use a common `at=error ` prefix for
+# easy log ingestion.
+
+[transforms.heroku-log-error-filter]
+type = "filter"
+inputs = ["heroku"]
+condition = 'starts_with(.message, "at=error ") ?? false'
+
+[transforms.heroku-log-error]
+type = "lua"
+version = "2"
+inputs = ["heroku-log-error-filter"]
+hooks.process = '''
+function (event, emit)
+    emit({
+        ["metric"] = {
+            ["counter"] = {
+                ["value"] = 1,
+            },
+            ["kind"] = "absolute",
+            ["name"] = "error",
+            ["namespace"] = "heroku_logs",
+        }
+    })
+
+    for key, value in event.log.message:gmatch("(code|method|mod|status)=([^ ]+)") do
+        emit({
+            ["metric"] = {
+                ["counter"] = {
+                    ["value"] = 1,
+                },
+                ["kind"] = "absolute",
+                ["name"] = key,
+                ["namespace"] = "heroku_logs",
+                ["tags"] = {
+                    [key] = value,
+                },
+            }
+        })
     end
 end
 '''
