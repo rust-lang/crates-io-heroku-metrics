@@ -18,7 +18,7 @@ query_parameters = ["app_name"]
 # Publish all the collected metrics as a Prometheus exporter.
 [sinks.prometheus]
 type = "prometheus_exporter"
-inputs = ["self", "heroku-postgres", "ingested-metrics"]
+inputs = ["self", "heroku-postgres", "heroku-router-errors", "ingested-metrics"]
 address = "0.0.0.0:8002"
 # Long flush period needed due to Heroku Postgres's log frequency:
 flush_period_secs = 600
@@ -113,3 +113,48 @@ function (event, emit)
     end
 end
 '''
+
+##############################
+#   Heroku Router metrics    #
+##############################
+
+# The Heroku load balancer ("Router") does not emit metrics, but instead logs a
+# line for every request or error, and it's our job to conver them to metrics.
+#
+# The `heroku-router-filter` -> `heroku-router-parse` transforms take care of
+# decoding Heroku Router log messages, and then we use separate transforms for
+# each metric we want to extract out of the logs.
+
+[transforms.heroku-router-filter]
+type = "filter"
+inputs = ["heroku"]
+condition = '.proc_id == "router"'
+
+[transforms.heroku-router-parse]
+type = "remap"
+inputs = ["heroku-router-filter"]
+# Merge into the log message data (".") the parsed key-value message.
+source = '. |= parse_key_value!(.message)'
+
+# Log lines with at=error represent one of the Heroku error codes, listed here:
+#
+#    https://devcenter.heroku.com/articles/error-codes
+#
+# We want to alert when they happen, so we generate metrics counting how many
+# times they happen.
+
+[transforms.heroku-router-errors-filter]
+type = "filter"
+inputs = ["heroku-router-parse"]
+condition = '.at == "error"'
+
+[transforms.heroku-router-errors]
+type = "log_to_metric"
+inputs = ["heroku-router-errors-filter"]
+[[transforms.heroku-router-errors.metrics]]
+type = "counter"
+name = "errors"
+field = "code" # Not sure why this is needed...
+namespace = "heroku_router"
+tags.code = "{{code}}"
+tags.dyno = "{{dyno}}"
