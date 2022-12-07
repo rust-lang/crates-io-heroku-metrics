@@ -52,6 +52,23 @@ Finally you can add a scrape configuration to Prometheus gathering the metrics:
 
 In Rust's production environment the container is running on ECS Fargate.
 
+## Testing ingestion locally
+
+The `simulate-heroku.py` script can help you test your configuration locally by
+parsing the output of `heroku logs --tail` and submitting it to vector.dev in
+the proper encoding. The recommended workflow locally is to start the
+container, gather locally a sample of the production logs with:
+
+```
+heroku logs --tail --app crates-io > /dev/shm/crates-io-logs
+```
+
+...and every time you want to test, submit the logs to the local instance:
+
+```
+cat /dev/shm/crates-io-logs | ./simulate-heroku.py http://drain:${PASSWORD_DRAIN}@localhost/drain?app_name=crates-io
+```
+
 ## Rationale and requirements
 
 To ensure smooth service operations the crates.io team needs to gather the
@@ -70,6 +87,8 @@ following metrics:
 * **Heroku Postgres** metrics, such as the load average, the IOPS or the cache hit
   ratio.
 
+* **Heroku Router** metrics, such as the amount of load balancer errors.
+
 The Rust Infrastructure team maintains a centralized monitoring solution based
 on Prometheus, but unfortunately that makes integration with applications
 running on Heroku hard.
@@ -81,10 +100,10 @@ gathering instance-level metrics impossible with a centralized Prometheus
 server. Heroku Postgres metrics aren't easier to gather either, as Heroku only
 exposes them by periodically writing a line in the application logs.
 
-Gathering Heroku Postgres metrics requires extracting them to the logs, so we
-decided to scrape service-level metrics directly with Prometheus, and create a
-single container (this!) to extract both Heroku Postgres and instance-level
-metrics from the logs.
+Gathering Heroku Postgres and Heroku Router metrics requires extracting them to
+the logs, so we decided to scrape service-level metrics directly with
+Prometheus, and create a single container (this!) to extract both Heroku
+Postgres and instance-level metrics from the logs.
 
 ## Design
 
@@ -140,6 +159,12 @@ Heroku Postgres metrics are extracted by parsing [the log lines emitted by
 Heroku itself][heroku-postgres-metrics]. A Lua transform parses each line and
 extracts the samples from it. There is no hardcoded list of metrics to extract,
 so everything Heroku provides is exported.
+
+### Heroku Router metrics
+
+Heroku Router metrics are extracted by parsing the logs emitted by Heroku
+itself for each requests. Multiple transforms then parse each log message and
+increment the right metrics based on the outcome of that request.
 
 [nginx]: https://nginx.org/
 [Vector]: https://vector.dev/
