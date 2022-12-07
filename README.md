@@ -93,6 +93,8 @@ ingest log messages and extract metrics out of them. Two password-protected
 HTTP endpoints are exposed:
 
 * `/drain`, which receives real-time log messages from [Heroku Logplex].
+  Messages [are batched][logplex-batches]: we don't receive one request per
+  log message.
 * `/metrics`, which exposes the processed Prometheus metrics ready to be
   scraped.
 
@@ -103,9 +105,13 @@ How metrics are extracted depends on the kind of metric.
 To gather instance-level metrics the container expects log messages in a
 specific format. Each line must be prefixed with the
 `crates-io-heroku-metrics:ingest` prefix, and must then contain the
-Base64-encoded JSON-encoded metrics data. To simplify the logic inside the
-container the metric data must be serialized according to [Vector's metric data
-model][data-model] (without the `timestamp` field). An example is this line:
+Base64-encoded JSON-encoded metrics data. Metrics data is encoded with base64
+to prevent other consumers of our logs (like Papertrail) from accidentally
+parsing the contents of the metrics.
+
+To simplify the logic inside the container the metric data must be serialized
+according to [Vector's metric data model][data-model] (without the `timestamp`
+field). An example is this line:
 
 ```
 crates-io-heroku-metrics:ingest W3sibWV0cmljIjp7ImdhdWdlIjp7InZhbHVlIjowLjB9LCJraW5kIjoiYWJzb2x1dGUiLCJuYW1lIjoic2FtcGxlX2dhdWdlIiwidGFncyI6e319fV0=
@@ -140,3 +146,4 @@ so everything Heroku provides is exported.
 [Heroku Logplex]: https://devcenter.heroku.com/articles/logplex
 [heroku-postgres-metrics]: https://devcenter.heroku.com/articles/heroku-postgres-metrics-logs
 [data-model]: https://vector.dev/docs/about/under-the-hood/architecture/data-model/metric/
+[logplex-batches]: https://devcenter.heroku.com/articles/log-drains#https-drains
