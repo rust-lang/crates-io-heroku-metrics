@@ -157,4 +157,5 @@ name = "errors"
 field = "code" # Not sure why this is needed...
 namespace = "heroku_router"
 tags.code = "{{code}}"
+tags.app = "{{app_name}}"
 tags.dyno = "{{dyno}}"
