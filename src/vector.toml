@@ -136,26 +136,68 @@ inputs = ["heroku-router-filter"]
 # Merge into the log message data (".") the parsed key-value message.
 source = '. |= parse_key_value!(.message)'
 
-# Log lines with at=error represent one of the Heroku error codes, listed here:
+# We want to monitor the errors reported by the Heroku Router, and the next few
+# transforms take care of that. The list of monitored error codes is defined in
+# the transform, while the list of all error codes is available at:
 #
 #    https://devcenter.heroku.com/articles/error-codes
 #
-# We want to alert when they happen, so we generate metrics counting how many
-# times they happen.
+# Note that the implementation here is fairly weird due to a quirk in
+# vector.dev. Heroku Router errors happen very rarely, but we still want to
+# have those metrics to be present with a value of 0, so that we can alert
+# based on them.
+#
+# Unfortunately vector.dev garbage collects metrics that have not been updated
+# in a while, and since Heroku Router errors are rare that would happen all the
+# time. To work around that, we emit a metric for each error code we care about
+# for EVERY request, even successful ones, and we increment the metric by 0 or
+# 1 depending on what the actual error code was.
 
-[transforms.heroku-router-errors-filter]
-type = "filter"
+[transforms.heroku-router-errors-map]
+type = "remap"
 inputs = ["heroku-router-parse"]
-condition = '.at == "error"'
+source = '''
+recorded = [
+    "H10", # App crashed
+    "H11", # Backlog too deep
+    "H12", # Request timeout
+    "H13", # Connection closed without response
+    "H14", # No web dynos running
+    "H15", # Idle connection
+    "H18", # Server request interrutped
+    "H19", # Backend connection timeout
+    "H20", # App boot timeout
+    "H21", # Backend connection refused
+    "H22", # Connection limiit reached
+]
+
+result = []
+for_each(recorded) -> |_index, current_code| {
+    increment_by = 0
+    if .at != "info" && .code == current_code {
+        increment_by = 1
+    }
+    result = push(result, {
+        "code": current_code,
+        "app": .app_name,
+        "process": .dyno,
+        "increment_by": increment_by,
+    })
+}
+
+. = result
+'''
 
 [transforms.heroku-router-errors]
 type = "log_to_metric"
-inputs = ["heroku-router-errors-filter"]
+inputs = ["heroku-router-errors-map"]
 [[transforms.heroku-router-errors.metrics]]
 type = "counter"
 name = "errors"
-field = "code" # Not sure why this is needed...
 namespace = "heroku_router"
 tags.code = "{{code}}"
-tags.app = "{{app_name}}"
-tags.process = "{{dyno}}"
+tags.app = "{{app}}"
+tags.process = "{{process}}"
+# Set the value of the metric to the "increment by" field.
+field = "increment_by"
+increment_by_value = true
